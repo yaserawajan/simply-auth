@@ -1,0 +1,32 @@
+{
+  "name": "simply-auth",
+  "version": "0.0.1",
+  "description": "extends axios to manage API state of authentication",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "/dist"
+  ],
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simplify9/simply-auth.git"
+  },
+  "author": "Yaser Awajan",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/simplify9/simply-auth/issues"
+  },
+  "homepage": "https://github.com/simplify9/simply-auth#readme",
+  "devDependencies": {
+    "typescript": "^4.6.3"
+  },
+  "peerDependencies": {
+    "axios": "^0.26.1"
+  },
+  "dependencies": {
+    
+  }
+}
