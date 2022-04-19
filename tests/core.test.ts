@@ -1,60 +1,72 @@
 import axios, { AxiosInstance } from 'axios';
-import { authApp, MemoryRepo, ValueRepo } from "../src/core";
+import { addAxiosInterceptors, authApp, ERR_SIGNIN_REQUESTED, MemoryRepo, ValueRepo } from "../src";
 import nock from "nock";
 
 
+axios.defaults.adapter = require('axios/lib/adapters/http')
 
-const installAuthApp = (axiosInstance: AxiosInstance, accessTokenRepo: ValueRepo, refreshTokenRepo: ValueRepo) => {
-    const { login, logOut, addAxiosInterceptors } = authApp({
+let seq = 0;
+
+nock.restore();
+
+nock("http://www.google.com")
+    .persist()
+    .post("/new_tokens")
+    .reply(function(uri, request_body) {
+        
+        if (request_body === `r-${seq.toString()}`) {
+            ++seq;
+            return [200, {
+                accessToken: `a-${seq.toString()}`,
+                refreshToken: `r-${seq.toString()}`,
+                accessTokenExpiry: 600
+            }];
+        }
+        else {
+            return [401, {}];
+        }
+    })
+    .get("/public_api")
+    .reply(function () {
+        return Promise.resolve([200, this.req.headers["authorization"]]);
+    })
+    .get("/protected_api")
+    .reply(function () {
+        const accessToken = this.req.headers["authorization"];
+        if (accessToken && accessToken.split(' ')[1] === `a-${seq.toString()}`) return [200, accessToken.split(" ")[1]];
+        else return ([401, { }]);
+    });
+
+if (!nock.isActive()) nock.activate();
+
+
+
+const installAuthApp = (axiosInstance: AxiosInstance, accessTokenRepo: ValueRepo, refreshTokenRepo: ValueRepo, logOutHandler?: () => void) => {
+    const auth = authApp({
         accessTokenRepo,
         refreshTokenRepo,
+        logOutHandler: logOutHandler ?? (() => {}),
         accessTokenGenerator: (axios, refreshToken) => {
             return axios({
                 method: "POST",
                 url: "http://www.google.com/new_tokens",
                 data: refreshToken
-            }).then(res => res.data);
+            }).then(res => res.data).catch(err => {
+                if (err.response && err.response.status === 401) {
+                    return Promise.resolve(null);
+                }
+                else {
+                    return Promise.reject(err);
+                }
+            });
         }
     });
 
-    addAxiosInterceptors(axiosInstance);
+    addAxiosInterceptors(axiosInstance, auth);
 }
 
 beforeEach(function (done) {
-
-    axios.defaults.adapter = require('axios/lib/adapters/http')
-
-    let seq = 0;
-
-    nock("http://www.google.com")
-        .persist()
-        .post("/new_tokens")
-        .reply(function(uri, request_body) {
-            
-            if (request_body === `r-${seq.toString()}`) {
-                ++seq;
-                return [200, {
-                    accessToken: `a-${seq.toString()}`,
-                    refreshToken: `r-${seq.toString()}`,
-                    accessTokenExpiry: 600
-                }];
-            }
-            else {
-                return [401, {}];
-            }
-        })
-        .get("/public_api")
-        .reply(function () {
-            return Promise.resolve([200, this.req.headers["authorization"]]);
-        })
-        .get("/protected_api")
-        .reply(function () {
-            const accessToken = this.req.headers["authorization"];
-            if (accessToken && accessToken.split(' ')[1] === `a-${seq.toString()}`) return [200, accessToken.split(" ")[1]];
-            else return ([401, { }]);
-        });
-
-    if (!nock.isActive()) nock.activate();
+    seq = 0;
     done();
 });
 
@@ -82,28 +94,36 @@ it("requests a new access token if API is protected and no token is available", 
     const refreshTokenRepo = new MemoryRepo("r-0");
     installAuthApp(a, accessTokenRepo, refreshTokenRepo);
 
-    const response = await a({
+    let response = await a({
         url: "http://www.google.com/protected_api",
     });
     
     expect(response.status).toBe(200);
     expect(response.data).toStrictEqual("a-1");
 
-    
+    response = await a({
+        url: "http://www.google.com/protected_api",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.data).toStrictEqual("a-1");
 });
 
-it("requests a new token if API is protected and invalidates old token", async () => {
+it("logs out if API is protected and new access token request is denied", async () => {
     const a = axios.create();
     const accessTokenRepo = new MemoryRepo();
-    const refreshTokenRepo = new MemoryRepo("r-0");
-    installAuthApp(a, accessTokenRepo, refreshTokenRepo);
+    const refreshTokenRepo = new MemoryRepo("invalid_token");
+    const logoutHandler = jest.fn();
+    installAuthApp(a, accessTokenRepo, refreshTokenRepo, logoutHandler);
 
-    const response = await a({
-        url: "http://www.google.com/protected_api",
-    });
+    try {
+        const response = await a({
+            url: "http://www.google.com/protected_api",
+        });
+    }
+    catch (err) {
+        expect(err).toBe(ERR_SIGNIN_REQUESTED);
+    }
     
-    expect(response.status).toBe(200);
-    expect(response.data).toStrictEqual("a-1");
-
-    
+    expect(logoutHandler).toHaveBeenCalled();
 });
