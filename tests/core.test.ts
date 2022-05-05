@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { addAxiosInterceptors, authApp, ERR_SIGNIN_REQUESTED, MemoryRepo, ValueRepo } from "../src";
+import { addAxiosInterceptors, authConfig, ERR_SIGNIN_REQUESTED, MemoryRepo, ValueCache } from "../src";
 import nock from "nock";
 
 
@@ -41,10 +41,10 @@ if (!nock.isActive()) nock.activate();
 
 
 
-const installAuthApp = (axiosInstance: AxiosInstance, accessTokenRepo: ValueRepo, refreshTokenRepo: ValueRepo, logOutHandler?: () => void) => {
-    const auth = authApp({
-        accessTokenRepo,
-        refreshTokenRepo,
+const installAuthApp = (axiosInstance: AxiosInstance, accessTokenCache: ValueCache, refreshTokenCache: ValueCache, logOutHandler?: () => void) => {
+    const auth = authConfig({
+        accessTokenCache,
+        refreshTokenCache,
         logOutHandler: logOutHandler ?? (() => {}),
         accessTokenGenerator: (axios, refreshToken) => {
             return axios({
@@ -79,13 +79,13 @@ it("does not pass an access token when not available and not needed", async () =
     expect(response.data).toStrictEqual("");
 });
 
-it("passes an access token when available", async () => {
+it("does not pass an access token until needed", async () => {
     const a = axios.create();
     installAuthApp(a, new MemoryRepo("acc456"), new MemoryRepo("ref789"));
     const response = await a({
         url: "http://www.google.com/public_api",
     });
-    expect(response.data).toStrictEqual("Bearer acc456");
+    expect(response.data).toStrictEqual("");
 });
 
 it("requests a new access token if API is protected and no token is available", async () => {

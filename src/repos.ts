@@ -1,6 +1,6 @@
-import { ValueRepo } from "./core";
+import { ValueCache } from "./types";
 
-export class MemoryRepo implements ValueRepo {
+export class MemoryRepo implements ValueCache {
 
     value: string | null
 
@@ -8,66 +8,45 @@ export class MemoryRepo implements ValueRepo {
         this.value = initValue ?? null;
     }
 
-    drop(): void {
+    drop() {
         this.value = null;
-    }
-
-    read(): string | null {
-        return this.value;
-    }
-
-    write(value: string, expiryInSeconds: number | null): void {
-        this.value = value;
-    }
-}
-
-export class ValueCache implements ValueRepo {
-
-    decoratee: ValueRepo
-    value: string | null
-
-    constructor(decoratee: ValueRepo) {
-        this.decoratee = decoratee;
-        this.value = decoratee.read();
+        return Promise.resolve();
     }
 
     read() {
-        return this.value;
+        return Promise.resolve(this.value);
     }
 
-    write(value:string, expiry: number | null) {
+    write(value: string, expiryInSeconds: number | null) {
         this.value = value;
-        this.decoratee.write(value, expiry);
+        return Promise.resolve();
+    }
+}
+
+export class LocalStorage implements ValueCache {
+
+    key: string
+
+    constructor(key: string) {
+        this.key = key;
     }
 
     drop() {
-        this.value = null;
-        this.decoratee.drop();
-    }
-}
-
-export class LocalStorage implements ValueRepo {
-
-    key: string
-
-    constructor(key: string) {
-        this.key = key;
-    }
-
-    drop(): void {
         localStorage.removeItem(this.key);
+        return Promise.resolve();
     }
 
-    read(): string | null {
-        return localStorage.getItem(this.key);
+    read() {
+        return Promise.resolve(localStorage.getItem(this.key));
     }
 
-    write(value: string, expiry: number | null): void {
+    write(value: string, expiry: number | null) {
         localStorage.setItem(this.key, value);
+        return Promise.resolve();
     }
 }
 
-export class SessionStorage implements ValueRepo {
+export class SessionStorage implements ValueCache {
 
     key: string
 
@@ -75,15 +54,17 @@ export class SessionStorage implements ValueRepo {
         this.key = key;
     }
 
-    drop(): void {
+    drop() {
         sessionStorage.removeItem(this.key);
+        return Promise.resolve();
     }
 
-    read(): string | null {
-        return sessionStorage.getItem(this.key);
+    read() {
+        return Promise.resolve(sessionStorage.getItem(this.key));
     }
 
-    write(value: string, expiryInSeconds: number | null): void {
+    write(value: string, expiryInSeconds: number | null) {
         sessionStorage.setItem(this.key, value);
+        return Promise.resolve();
     }
 }

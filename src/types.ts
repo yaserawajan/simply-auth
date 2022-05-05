@@ -1,18 +1,18 @@
 import { AxiosInstance } from "axios";
 
 
-export interface AuthApp {
-    accessTokenCache: ValueRepo
+export interface AuthConfig {
+    accessTokenCache: ValueCache
     logOutHandler: () => void
-    refreshTokenCache: ValueRepo | null
+    refreshTokenCache?: ValueCache
     refreshTokenExpiry: number | null
     accessTokenGenerator?: (axios:AxiosInstance, refreshToken: string) => Promise<AccessTokenResponse | null>
 }
 
-export interface ValueRepo {
-    drop(): void
-    read(): string | null
-    write(value: string, expiryInSeconds: number | null): void
+export interface ValueCache {
+    drop(): Promise<void>
+    read(): Promise<string | null>
+    write(value: string, expiryInSeconds: number | null): Promise<void>
 }
 
 export interface AccessTokenResponse {
@@ -21,10 +21,10 @@ export interface AccessTokenResponse {
     accessTokenExpiry: number
 }
 
-export interface SimplyAuthOptions {
-    accessTokenRepo?: ValueRepo
+export interface AuthParams {
+    accessTokenCache?: ValueCache
     logOutHandler?: () => void
-    refreshTokenRepo?: ValueRepo
+    refreshTokenCache?: ValueCache
     refreshTokenExpiry?: number | null
     accessTokenGenerator?: (axios:AxiosInstance, refreshToken: string) => Promise<AccessTokenResponse | null>
 }
@@ -32,5 +32,5 @@ export interface SimplyAuthOptions {
 export interface AuthApi {
     login: (tokens: AccessTokenResponse) => void
     logout: () => void
-    isLoggedIn: () => boolean
+    isLoggedIn: boolean
 }

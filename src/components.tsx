@@ -1,21 +1,32 @@
-import React, { useContext } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import { isLoggedInCallback, loginCallback, logoutCallback } from "./api";
-import { AuthApi, AuthApp } from "./core";
+import { AuthApi, AuthConfig } from "./types";
 
 const noOp = () => { }
-const authApiContext = React.createContext<AuthApi>({ login: noOp, logout: noOp, isLoggedIn: () => false });
+const authApiContext = React.createContext<AuthApi>({ login: noOp, logout: noOp, isLoggedIn: false });
 
-export const AuthApiProvider:React.FC<{ authApp: AuthApp, children?: React.ReactNode; }> = ({ authApp, children }) => {
+export const AuthApiProvider:React.FC<{ authApp: AuthConfig, children?: React.ReactNode; }> = ({ authApp, children }) => {
 
-    const login = loginCallback(authApp);
-    const logout = logoutCallback(authApp);
-    const isLoggedIn = isLoggedInCallback(authApp);
+    const [isLoggedIn, setLoggedIn] = useState<boolean | null>(null);
+
+    const api = useMemo(() => ({
+        login: loginCallback(authApp),
+        logout: logoutCallback(authApp),
+        isLoggedIn
+    }), [isLoggedIn, ...Object.values(authApp)]);
+
+    useEffect(() => {
+        isLoggedInCallback(authApp)()
+            .then(value => {
+                setLoggedIn(value);
+            });
+    }, [...Object.values(authApp)]);
 
     return (
-        <authApiContext.Provider value={{ login, logout, isLoggedIn }}>
-            {children}
-        </authApiContext.Provider>
-    )
+        isLoggedIn !== null
+            ? <authApiContext.Provider value={api as AuthApi}>{children}</authApiContext.Provider>
+            : null
+    );
 } 
 
 export const useAuthApi = ():AuthApi => {

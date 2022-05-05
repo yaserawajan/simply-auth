@@ -1,7 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from "axios";
-import React, { useContext } from "react";
-import { AuthApp, SimplyAuthOptions, AccessTokenResponse, AuthApi } from "./core";
-import { SessionStorage, LocalStorage, ValueCache } from "./repos";
+import { AuthConfig, AuthParams, AccessTokenResponse } from "./types";
+import { SessionStorage } from "./repos";
 
 
 const defaultLogOutHandler = () => {
@@ -12,44 +11,40 @@ const defaultLogOutHandler = () => {
  * 
  * @param options 
  */
- export const authApp = ({
-    accessTokenRepo = new SessionStorage("__t_access"),
-    refreshTokenRepo = new LocalStorage("__t_refresh"),
+ export const authConfig = ({
+    accessTokenCache = new SessionStorage("__t_access"),
+    refreshTokenCache,
     logOutHandler = defaultLogOutHandler,
     accessTokenGenerator,
     refreshTokenExpiry = null,
-}: SimplyAuthOptions):AuthApp => {
-
-    // token caches
-    let accessTokenCache = new ValueCache(accessTokenRepo);
-    let refreshTokenCache = refreshTokenRepo === undefined ? null : new ValueCache(refreshTokenRepo);
-
-    return {
+}: AuthParams):AuthConfig => ({
         accessTokenCache,
         refreshTokenCache,
         refreshTokenExpiry,
         logOutHandler,
         accessTokenGenerator
+    });
+
+export const isLoggedInCallback = ({ accessTokenCache }: AuthConfig) => 
+    async () => {
+        const value = await accessTokenCache.read();
+        return value !== null;
     };
-}
-
-export const isLoggedInCallback = ({ accessTokenCache, refreshTokenCache }: AuthApp) => 
-    () => ((accessTokenCache.read() !== null) || (
-        !!refreshTokenCache && refreshTokenCache.read() !== null
-    ));
 
 
-export const logoutCallback = ({ refreshTokenCache, logOutHandler }: AuthApp) => {
-    return () => {
-        refreshTokenCache?.drop();
+export const logoutCallback = ({ refreshTokenCache, logOutHandler }: AuthConfig) => {
+    return async () => {
+        await refreshTokenCache?.drop();
         logOutHandler();
     }
 }
 
-export const loginCallback = ({ accessTokenCache, refreshTokenCache, refreshTokenExpiry }: AuthApp) => {
-    return (tokens: AccessTokenResponse) => {
-        accessTokenCache.write(tokens.accessToken, tokens.accessTokenExpiry);
-        refreshTokenCache?.write(tokens.refreshToken, refreshTokenExpiry);
+export const loginCallback = ({ accessTokenCache, refreshTokenCache, refreshTokenExpiry }: AuthConfig) => {
+    return async (tokens: AccessTokenResponse) => {
+        await accessTokenCache.write(tokens.accessToken, tokens.accessTokenExpiry);
+        if (refreshTokenCache) {
+            await refreshTokenCache?.write(tokens.refreshToken, refreshTokenExpiry);
+        }
     }
 }
 
@@ -72,60 +67,73 @@ export const oneCallAtATime = <T>(pFn: (...params:any[]) => Promise<T>) => {
     }
 }
 
-export const addAxiosInterceptors = (axiosInstance: AxiosInstance, authApp: AuthApp) => {
+export const addAxiosInterceptors = (axiosInstance: AxiosInstance, config: AuthConfig) => {
 
-    const logOut = logoutCallback(authApp);
+    const logOut = logoutCallback(config);
 
-    const login = loginCallback(authApp);
+    const login = loginCallback(config);
 
-    const authApi = axios.create();
+    const authAxiosInstance = axios.create();
 
-    const newAccessTokenSaga = oneCallAtATime((): Promise<string> => {
-        // Bad access token, drop from cache
-        authApp.accessTokenCache.drop();
-        // request refresh token if supported
-        if (authApp.refreshTokenCache !== null) {
-            const refreshTokenValue = authApp.refreshTokenCache.read();
-            // ensure refresh token is there
-            if (refreshTokenValue !== null && authApp.accessTokenGenerator) {
-                // issue request for new token pair
-                return authApp.accessTokenGenerator(authApi, refreshTokenValue)
-                    .then(newTokens => {
-                        if (newTokens !== null) {
-                            login(newTokens);
-                            return newTokens.accessToken;
-                        }
-                        else {
-                            logOut();
-                            return Promise.reject(ERR_SIGNIN_REQUESTED);
-                        }
-                    })
-                    .catch(err => {
-                        logOut();
-                        return Promise.reject(err);
-                    });
+    const getAccessToken = async (triedButFailed: string | null):Promise<string> => {
+
+        const cachedValue = await config.accessTokenCache.read();
+        if (cachedValue !== null && cachedValue !== triedButFailed) {
+            return cachedValue;
+        }
+        
+        // drop from cache
+        await config.accessTokenCache.drop();
+
+        const refreshToken = config.refreshTokenCache
+            ? await config.refreshTokenCache.read()
+            : null;
+
+        // create new access / refresh token if possible
+        if (refreshToken !== null && config.accessTokenGenerator) {
+
+            try {
+                const newTokens = await config.accessTokenGenerator(authAxiosInstance, refreshToken);
+                if (newTokens !== null) {
+                    await login(newTokens);
+                    return newTokens.accessToken;
+                }
+            }
+            catch (err) {
+                // LOG AND MUTE ERROR
+                // ...
             }
         }
-        // no refresh token value, we need sign in
-        logOut();
-        return Promise.reject(ERR_SIGNIN_REQUESTED);
-    });
+        
+        await logOut();
+
+        throw ERR_SIGNIN_REQUESTED;
+    }
+
+    // INTERCEPTORS
+
+    let accessToken:string | null = null;
 
     axiosInstance.interceptors.request.use((req: AxiosRequestConfig) => {
         // append access token if available
-        const accessTokenValue = authApp.accessTokenCache.read();
-        return accessTokenValue !== null
-            ? { ...req, headers: { ...req.headers, "Authorization": `Bearer ${accessTokenValue}` }}
+        return accessToken !== null
+            ? { ...req, headers: { ...req.headers, "Authorization": `Bearer ${accessToken}` }}
             : req;
     });
 
     axiosInstance.interceptors.response.use(
         (response: AxiosResponse) => response, 
         (error: AxiosError) => {
+
+            if (error.response && error.response.status === 401) {
+                return getAccessToken(accessToken)
+                    .then(newValue => {
+                        accessToken = newValue;
+                        return axiosInstance(error.config);
+                    });
+            }
             
-            return (error.response && error.response.status === 401) 
-                ? newAccessTokenSaga().then(_ => axiosInstance(error.config))
-                : Promise.reject(error);
+            return Promise.reject(error);
         });
 }
 
