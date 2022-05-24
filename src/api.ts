@@ -75,7 +75,7 @@ export const addAxiosInterceptors = (axiosInstance: AxiosInstance, config: AuthC
 
     const authAxiosInstance = axios.create();
 
-    const getAccessToken = async (triedButFailed: string | null):Promise<string> => {
+    const getAccessToken = oneCallAtATime(async (triedButFailed: string | null):Promise<string> => {
 
         const cachedValue = await config.accessTokenCache.read();
         if (cachedValue !== null && cachedValue !== triedButFailed) {
@@ -108,7 +108,7 @@ export const addAxiosInterceptors = (axiosInstance: AxiosInstance, config: AuthC
         await logOut();
 
         throw ERR_SIGNIN_REQUESTED;
-    }
+    });
 
     // INTERCEPTORS
 
